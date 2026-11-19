@@ -124,6 +124,48 @@ must also convert, per harness and with fidelity dispositions like the transcrip
   a2a-source). Design input before P4: swarma-docs book + swarma-link-spec (local checkouts:
   `swarma-lead/book`, `swarma-link-spec`), plus agents1-keeper / swarma-lead (hibernating) review.
 
+## Identity and transport abstraction (owner discussion, 2026-11-19)
+
+- a2a must not be hard-bound to Matrix. The seam is a transport-profile config that maps an
+  identity to one or more transports (Matrix, XMPP, Mattermost, Nostr, ...), each with its own
+  account/address and device keys. `identity ensure` takes an explicit transport selection
+  (e.g. `--transport matrix`) instead of assuming Matrix; Matrix is the first adapter, XMPP second
+  (per signing-auth notes). L0 in conversion terms is therefore "transport account + local
+  credentials", not "Matrix account".
+- The chain identity abstracts the transports (Swarma Link, "Личность и имена" / "Ключи" +
+  signing-auth `05-devices`): identity = permanent root key; the own Namecoin name's value
+  publishes the working keys; each transport account/device is a *device* of that identity —
+  the operator root attests the Matrix master (devices verify via Matrix self-signing),
+  each XMPP OMEMO fingerprint is attested separately; a device key carries its own
+  attestation scope and its own revocation entry in the owner's cumulative revocation snapshot.
+  The recent direction the owner recalls is this device-key model; in link-spec the adopted LIPs
+  run to LIP-0008 (grant v4; "channel descriptors and Matrix key support" still an open question),
+  while book v3 name values are exact LIP-0004 bytes (`swarma.landlord.grant` + `nostr`) until the
+  future parser (book calls it the LIP-0010 parser) is deployed at every verifier — extra members
+  are not yet safe to write.
+- Registrar service model (who creates identities): an agent never registers another agent's
+  identity, but it may *request* one from an operator-run registration service (human or a
+  high-rank trusted agent acting for the owner; see the `swarma-registrar` module). Flow: signed
+  request with role/scope -> service verifies grant and quota -> service creates the root key in
+  keyvault custody, sponsors the Namecoin name registration (cold name-owner key never leaves
+  operator custody), writes the name value (working/message key), issues transport accounts and
+  the device attestations, and hands the new agent only its working keys over a sealed channel.
+  Key-only operation without a chain name remains the base case (one-off executors); long-lived
+  workers/orchestrators get own `id/` names.
+- Prepaid renewal: at registration, reserve N renewal outputs intended to fund `name_update`
+  renewals for N nominal years; reserved outputs are fenced off from ordinary spends. Caveat that
+  the draft must solve honestly: coins alone do not renew — a signature by the name-owner key is
+  required, so the design needs either a constrained renewal-only key/script that can re-issue the
+  same value but cannot transfer the name or change its value, watched by a renewal service, or
+  pre-signed renewal transactions with their expiry limits studied. Base case: no reservations
+  created -> loud registration-time warning + expiry alarms. Candidate next LIP draft (owner to
+  confirm): "Prepaid name renewal reservations".
+- `identity ensure` today (a2a): computes `<host>_<project>_<role>` (project from the git remote),
+  reuses local credentials or registers the Matrix account (operator supplies the registration
+  token via env), joins #lobby (+#broadcast), creates the project room when missing, adds baseline
+  subscriptions, installs runtime hooks. It does not enforce keeper readiness, and `--runtime`
+  lacks `muse`/`pi`. Both are a2a-side fix items for the a2a-source lane.
+
 ## Station plan (pending owner confirmation)
 
 - Orchestrator: this Muse session's lane identity `ivmbp_session-convert_orch` (a2a), owner DM
