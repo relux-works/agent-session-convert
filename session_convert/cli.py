@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import codex_import
+from . import binding, codex_import
 from .context import render
 from .ir import capture, file_digest, write_json
 from .muse import uuid7_now
@@ -34,7 +34,7 @@ def schedules(source, provider):
 
 
 def project(bundle, directory, provider, workspace, profile, budget, full_history, apply, source=None,
-            qualification=False, strategy="native"):
+            qualification=False, strategy="native", destination=None):
     if not workspace.is_dir():
         raise ValueError("target workspace must exist")
     workspace = workspace.resolve()
@@ -51,6 +51,10 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
     stamp = now.astimezone(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     sid = uuid7_now()
     target = store_path(provider, sid, workspace, now)
+    if destination and destination["kind"] == "curator":
+        root = Path(destination["home"]) / binding.STORE[provider]
+        if target.resolve() != target or not target.is_relative_to(root):
+            raise ValueError("target outside resolved Curator store")
     staged = directory / "session.jsonl"
     official_fork = apply and provider == "codex" and not qualification
     if apply:
@@ -104,6 +108,8 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
                canonical_session_id=session["canonical_session_id"]))
     result = dict(state="staged", target_provider=provider, target_id=sid, workspace=str(workspace),
                   source_sha256=session["raw_sha256"], staged_sha256=file_digest(staged))
+    if destination:
+        result["destination"] = destination
     write_json(directory / "validation.json", result)
     if apply:
         if provider == "muse":
@@ -122,8 +128,7 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
                 target.unlink()
             raise
         result.update(state="published", target_log=str(target),
-                      resume_argv=[provider, "--resume", sid] if provider == "claude"
-                      else [provider, "resume", sid])
+                      resume_argv=binding.resume(provider, sid, destination))
         write_json(directory / "validation.json", result)
     return result
 
@@ -131,6 +136,10 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
 def parser():
     p = argparse.ArgumentParser(prog="agent-session-convert")
     subs = p.add_subparsers(dest="command", required=True)
+    locate = subs.add_parser("locate", help="locate a native UUID in registered Curator homes")
+    locate.add_argument("--from", dest="reader", required=True, choices=READERS)
+    locate.add_argument("--session-id", required=True)
+    locate.add_argument("--source-profile")
     for name in ("capture", "project", "convert"):
         sub = subs.add_parser(name)
         sub.add_argument("--out-dir", type=Path, required=True)
@@ -148,6 +157,13 @@ def parser():
             sub.add_argument("--full-history", action="store_true")
         if name == "convert":
             sub.add_argument("--apply", action="store_true")
+            group = sub.add_mutually_exclusive_group()
+            group.add_argument("--target-profile")
+            group.add_argument("--personal", action="store_true")
+            sub.add_argument("--expect-home")
+            sub.add_argument("--expect-lock")
+            sub.add_argument("--expect-source-id")
+            sub.add_argument("--reuse-published", action="store_true")
     return p
 
 
@@ -155,8 +171,33 @@ def main(argv=None):
     os.umask(0o077)
     a = parser().parse_args(argv)
     try:
+        target = None
+        if a.command == "locate":
+            print(json.dumps(binding.locate(a.reader, a.session_id, a.source_profile)))
+            return 0
         if a.command != "project":
+            origin = binding.provenance(a.source_log, a.reader)
+            if getattr(a, "expect_source_id", None) and (not origin or origin["profile"] != a.target_profile
+                    or origin["lock"] != a.expect_lock):
+                raise ValueError("source no longer matches the pinned Curator profile")
+            if getattr(a, "apply", False):
+                target = binding.destination(origin, a.writer, a.target_profile, a.personal,
+                                             a.expect_home, a.expect_lock)
+            if getattr(a, "reuse_published", False):
+                if not (a.apply and a.expect_source_id and a.expect_home and a.expect_lock and
+                        origin and target and target["kind"] == "curator"):
+                    raise ValueError("reuse requires a pinned managed transfer")
+                if a.out_dir.exists():
+                    print(json.dumps(binding.previous_target(a.out_dir, target, a.writer, a.workspace,
+                                                             a.source_log, a.expect_source_id)))
+                    return 0
             capture(a.source_log, a.reader, a.out_dir)
+            if origin:
+                write_json(a.out_dir / "source-binding.json", origin)
+            if getattr(a, "expect_source_id", None):
+                manifest = json.loads((a.out_dir / "session.json").read_bytes())
+                if not origin or manifest["source_native_session_id"] != a.expect_source_id:
+                    raise ValueError("source native identity mismatch")
             if a.command == "capture":
                 print(a.out_dir / "session.json")
                 return 0
@@ -164,7 +205,7 @@ def main(argv=None):
         out = a.out_dir if a.command == "project" else bundle / "projection"
         print(json.dumps(project(bundle, out, a.writer, a.workspace, a.profile, a.max_tool_chars,
                                  a.full_history, getattr(a, "apply", False), getattr(a, "source_log", None),
-                                 strategy=a.strategy)))
+                                 strategy=a.strategy, destination=target)))
         return 0
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as e:
         print(f"conversion failed: {e}", file=sys.stderr)

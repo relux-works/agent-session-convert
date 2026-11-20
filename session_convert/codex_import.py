@@ -7,6 +7,7 @@ import subprocess
 import threading
 from uuid import UUID
 
+from . import binding
 from .ir import write_json
 from .readers import codex
 
@@ -92,6 +93,6 @@ def publish_fork(staged, workspace, messages, result):
                     persisted.append((kind.split("_")[0], payload["content"][0]["text"]))
     if persisted != messages:
         raise ValueError("Codex persisted different model-visible history")
-    result.update(state="published", target_log=str(path), resume_argv=["codex", "resume", sid])
+    result.update(state="published", target_log=str(path), resume_argv=binding.resume("codex", sid, result.get("destination")))
     write_json(receipt, result)
     return result

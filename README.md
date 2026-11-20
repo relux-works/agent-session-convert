@@ -25,6 +25,21 @@ Native staging supports all nine combinations. Add `--apply` to `convert` to pub
 | Claude, Codex or Muse | Codex CLI 0.171.0, macOS arm64, ChatGPT login | The local app-server forks the staged rollout into a new account-scoped thread. Both visible turns and persisted model input must match. |
 | Claude | Muse Code 1.4.24 build R9131.1 | Muse mints a fresh permission transaction and inspects staged and published history. |
 
+Managed publication resolves the original profile for the destination runtime through
+`curator env resolve`. The source marker must match Curator's registered home and
+the target profile lock must match when continuing that profile. A raw export
+without verified provenance requires `--target-profile NAME` or an explicit
+`--personal` destination. The target store and resume command are recorded
+in the receipt. `--profile compact` controls transcript rendering only.
+
+The launcher discovers a managed source through
+`agent-session-convert locate --from muse --session-id UUID`. It pins the returned
+profile lock, the source UUID and the resolved destination home at publication.
+Its stable output directory is claimed exclusively; a repeated launch can reuse
+a fully published target after verifying the source digest and native identity.
+An interrupted or changed operation requires reconciliation against its receipt.
+A transcript publication carries no authority to install hooks or claim an a2a identity.
+
 Read the target UUID and resume arguments in `projection/validation.json`. Codex allocates its own UUID. If publication is interrupted, inspect the receipt for a pending or already-created fork before retrying. The same-provider Codex proof used one account. Cross-account migration and new target versions require separate qualification.
 
 Use `--strategy continuation_context` on any combination to produce `continuation.txt` and `launch.json`. The plan gives the target CLI arguments, working directory and optional input file. Launching that command sends the projected text to the chosen target as one historical message. Codex returns its new UUID in the `thread.started` event. This strategy starts a new context and does not retain native message boundaries.
