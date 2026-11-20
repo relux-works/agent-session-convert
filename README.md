@@ -2,6 +2,8 @@
 
 Convert a Claude Code, Codex CLI or Muse Code transcript through an on-disk intermediate representation (IR). Every reader feeds the same planner. Each native writer consumes the ordered projection. Adding a fourth provider requires one reader and one writer.
 
+See the [same-machine handoff implementation and acceptance plan](SAME-MACHINE-HANDOFF.md) for lane continuity, cross-module release gates, reviewer placement and deployment evidence.
+
 ## CLI
 
 Python 3.9 or later. Run from a checkout or use the executable distributed by the transfer skill.
