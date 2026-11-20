@@ -18,7 +18,14 @@ Bundle paths must be fresh. The private bundle contains a byte-exact snapshot of
 
 ### Native publication and continuation
 
-Native staging supports the nine combinations of the three providers, including same-provider copies. Native publication currently admits Claude → Muse Code 1.4.24 build R9131.1. Add `--apply` to `convert` to mint a fresh permission transaction, inspect staged and published history, and receive the workspace and resume arguments in `projection/validation.json`. Production admission for other combinations requires the provider and account qualification described below.
+Native staging supports all nine combinations. Add `--apply` to `convert` to publish these qualified routes:
+
+| Source | Target | Publication |
+| --- | --- | --- |
+| Claude, Codex or Muse | Codex CLI 0.171.0, macOS arm64, ChatGPT login | The local app-server forks the staged rollout into a new account-scoped thread. Both visible turns and persisted model input must match. |
+| Claude | Muse Code 1.4.24 build R9131.1 | Muse mints a fresh permission transaction and inspects staged and published history. |
+
+Read the target UUID and resume arguments in `projection/validation.json`. Codex allocates its own UUID. If publication is interrupted, inspect the receipt for a pending or already-created fork before retrying. The same-provider Codex proof used one account. Cross-account migration and new target versions require separate qualification.
 
 Use `--strategy continuation_context` on any combination to produce `continuation.txt` and `launch.json`. The plan gives the target CLI arguments, working directory and optional input file. Launching that command sends the projected text to the chosen target as one historical message. Codex returns its new UUID in the `thread.started` event. This strategy starts a new context and does not retain native message boundaries.
 

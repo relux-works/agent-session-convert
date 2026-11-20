@@ -81,8 +81,10 @@ QUESTION = "Which verification word did I give you earlier? Reply with just that
 
 def verify_turn(provider, info, word, output):
     sid = info["target_id"]
+    log = Path(info["target_log"])
+    offset = log.stat().st_size
     if provider == "claude":
-        argv = ["claude", "-p", "--resume", sid, "--tools", "", "--max-turns", "1", QUESTION]
+        argv = ["claude", "--safe-mode", "-p", "--resume", sid, "--tools", "", "--max-turns", "1", QUESTION]
     elif provider == "codex":
         argv = ["codex", "exec", "--sandbox", "read-only", "resume", "--skip-git-repo-check",
                 "--output-last-message", str(output), sid, QUESTION]
@@ -90,9 +92,19 @@ def verify_turn(provider, info, word, output):
         argv = ["muse", "exec", "--session-id", sid, "--workspace", info["workspace"],
                 "--disable-shell", "--disable-write", "--disable-web-tools", QUESTION]
     proc = subprocess.run(argv, cwd=info["workspace"], capture_output=True, timeout=180, text=True)
-    answer = output.read_text() if provider == "codex" and output.exists() else proc.stdout
-    if proc.returncode or word not in [line.strip() for line in answer.splitlines()]:
-        raise ValueError("bounded resume did not return the fixture word")
+    if proc.returncode:
+        raise ValueError(f"bounded {provider} resume exited with code {proc.returncode}")
+    answers = []
+    with log.open("rb") as transcript:
+        transcript.seek(offset)
+        for line in transcript:
+            for kind, payload in READERS[provider](json.loads(line)):
+                if kind == "tool_call":
+                    raise ValueError("bounded resume used a tool")
+                if kind == "assistant_message":
+                    answers.extend(b["text"].strip() for b in payload["content"])
+    if not answers or answers[-1] != word:
+        raise ValueError("new native reply did not return the fixture word")
 
 
 def main():
@@ -131,7 +143,7 @@ def main():
             cell = results[name] = dict(status="pending")
             try:
                 target = project(bundle, output / name, writer, workspace, "compact", 240, False,
-                                 True, source, qualification=True)
+                                 True, source, qualification=not (a.check_turn and writer == "codex"))
                 provider_readback(writer, target, a.word)
                 cell["native_readback"] = True
                 if a.check_turn:

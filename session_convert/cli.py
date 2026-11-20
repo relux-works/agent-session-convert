@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 
+from . import codex_import
 from .context import render
 from .ir import capture, file_digest, write_json
 from .muse import uuid7_now
@@ -51,8 +52,11 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
     sid = uuid7_now()
     target = store_path(provider, sid, workspace, now)
     staged = directory / "session.jsonl"
+    official_fork = apply and provider == "codex" and not qualification
     if apply:
-        if not qualification:
+        if official_fork:
+            codex_import.require_version()
+        elif not qualification:
             if (session["source_provider"], provider) != ("claude", "muse"):
                 raise ValueError("native writer awaiting provider qualification; projection available offline")
             version = subprocess.check_output(["muse", "--version"], text=True, timeout=15).strip()
@@ -94,7 +98,8 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
                     else (role, value) for role, value in expanded]
     if identities != {sid} or observed != expected:
         raise ValueError("native readback mismatch")
-    write_json(directory / "fidelity.json", dict(profile=profile, strategy="target_native_writer",
+    write_json(directory / "fidelity.json", dict(profile=profile,
+               strategy="target_official_import" if official_fork else "target_native_writer",
                items=report, synthesized=["migration checkpoint", "target envelopes"],
                canonical_session_id=session["canonical_session_id"]))
     result = dict(state="staged", target_provider=provider, target_id=sid, workspace=str(workspace),
@@ -106,6 +111,8 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
         if file_digest(source) != session["raw_sha256"]:
             raise ValueError("source_changed_during_conversion")
         schedules(source, session["source_provider"])
+        if official_fork:
+            return codex_import.publish_fork(staged, workspace, messages, result)
         publish(staged, target)
         try:
             if provider == "muse":
