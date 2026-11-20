@@ -90,7 +90,8 @@ def project(bundle, directory, provider, workspace, profile, budget, full_histor
             expanded.append(item)
         if expanded[-1][0] == "user":
             expanded.append(("assistant", "[source turn had no assistant text]"))
-        expected = expanded
+        expected = [(role, value or "[source turn had no assistant text]") if role == "assistant"
+                    else (role, value) for role, value in expanded]
     if identities != {sid} or observed != expected:
         raise ValueError("native readback mismatch")
     write_json(directory / "fidelity.json", dict(profile=profile, strategy="target_native_writer",

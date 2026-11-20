@@ -43,14 +43,24 @@ def claude(r):
     if r.get("isSidechain") or r.get("isMeta"):
         return
     if kind in ("user", "assistant"):
-        role = "compaction" if r.get("isCompactSummary") else kind + "_message"
-        yield from blocks(role, r["message"]["content"], {"text"})
+        parts = blocks(kind + "_message", r["message"]["content"], {"text"})
+        if r.get("isCompactSummary"):
+            summary = []
+            for fact, payload in parts:
+                if fact == kind + "_message":
+                    summary.extend(block["text"] for block in payload["content"])
+                else:
+                    yield fact, payload
+            if any(summary):
+                yield text("compaction", "\n".join(summary))
+        else:
+            yield from parts
 
 
 def codex(r):
     p = r.get("payload", {})
     kind = p.get("type") if isinstance(p, dict) else None
-    if r.get("type") == "compacted" and isinstance(p.get("message"), str):
+    if r.get("type") == "compacted" and isinstance(p.get("message"), str) and p["message"].strip():
         yield text("compaction", p["message"])
     if r.get("type") != "response_item":
         return

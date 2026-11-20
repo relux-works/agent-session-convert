@@ -15,29 +15,6 @@ private func run(_ args: [String]) throws -> Int32 {
     return process.terminationStatus
 }
 
-private func source(_ provider: String) -> String {
-    switch provider {
-    case "claude":
-        return """
-        {"sessionId":"source","type":"user","message":{"content":"marker-one"}}
-        {"sessionId":"source","type":"assistant","message":{"content":[{"type":"thinking","thinking":"SECRET-TEST"},{"type":"text","text":"marker-two"}]}}
-        """
-    case "codex":
-        return """
-        {"type":"session_meta","payload":{"id":"source"}}
-        {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"marker-one"}]}}
-        {"type":"response_item","payload":{"type":"reasoning","encrypted_content":"SECRET-TEST"}}
-        {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"marker-two"}]}}
-        """
-    default:
-        return """
-        {"stream":{"kind":"session","id":"source"},"payload_type":"runtime.user_intent.accepted","payload":{"refill_blocks":[{"kind":"text","text":"marker-one"}]}}
-        {"payload_type":"runtime.session","payload":{"event":{"kind":"reasoning_committed","encrypted_content":"SECRET-TEST"}}}
-        {"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"marker-two"}}}
-        """
-    }
-}
-
 // Each source is captured once and removed. Independent projection processes must preserve both
 // visible messages in order and keep the reasoning sentinel out of all three target transcripts.
 @Test(arguments: providers) func independentProjection(sourceProvider: String) throws {
@@ -45,7 +22,8 @@ private func source(_ provider: String) -> String {
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: dir) }
     let src = dir.appendingPathComponent("source.jsonl"), bundle = dir.appendingPathComponent("ir")
-    try source(sourceProvider).write(to: src, atomically: true, encoding: .utf8)
+    let fixture = cli.deletingLastPathComponent().appendingPathComponent("fixtures/\(sourceProvider).jsonl")
+    try FileManager.default.copyItem(at: fixture, to: src)
     try #require(run(["capture", "--from", sourceProvider, "--source-log", src.path, "--out-dir", bundle.path]) == 0)
     try FileManager.default.removeItem(at: src)
     for target in providers {
@@ -54,10 +32,10 @@ private func source(_ provider: String) -> String {
         try #require(run(args) == 0)
         let log = out.appendingPathComponent("session.jsonl")
         let records = try String(contentsOf: log, encoding: .utf8)
-        let first = try #require(records.range(of: "marker-one"))
-        let second = try #require(records.range(of: "marker-two"))
+        let first = try #require(records.range(of: "juniper-749"))
+        let second = try #require(records.range(of: "I have recorded the word."))
         #expect(first.lowerBound < second.lowerBound)
-        #expect(!records.contains("SECRET-TEST"))
+        #expect(!records.contains("private-fixture"))
         // An existing projection is create-only, including when a caller retries.
         #expect(try run(args) != 0)
         #expect(try String(contentsOf: log, encoding: .utf8) == records)

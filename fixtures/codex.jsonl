@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"fixture-codex","cli_version":"0.171.0"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Our verification word is juniper-749."}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Our verification word is juniper-749."}}
+{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"private-fixture"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I have recorded the word."}]}}

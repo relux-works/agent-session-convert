@@ -14,8 +14,14 @@ def plan(bundle, profile, budget, full_history):
     path = session["active_path"]
     active = set(path) if path is not None else None
     boundary = -1
-    if not full_history:
-        boundary = max((e["ordinal"] for i, e in read(bundle) if e["kind"] == "compaction" and (active is None or i in active)), default=-1)
+    results = set()
+    for ident, event in read(bundle):
+        if active is not None and ident not in active:
+            continue
+        if event["kind"] == "compaction" and not full_history:
+            boundary = event["ordinal"]
+        if event["kind"] == "tool_result":
+            results.add(event["payload"]["call_id"])
     messages = [("user", CHECKPOINT), ("assistant", "Historical context follows.")]
     dispositions = []
     for ident, e in read(bundle):
@@ -32,6 +38,8 @@ def plan(bundle, profile, budget, full_history):
                 value = "[Historical compaction summary]\n" + value
             messages.append((role, value))
             disposition, reason = "semantic", "native_text_projection"
+        elif kind == "tool_call" and (not p["call_id"] or p["call_id"] not in results):
+            disposition, reason = "opaque_preserved", "unsafe_pending_action"
         elif kind in ("tool_call", "tool_result") and profile != "messages_only":
             if kind == "tool_call":
                 tag, value = "tool " + str(p["name"]), p["arguments"]

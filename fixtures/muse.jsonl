@@ -1,0 +1,3 @@
+{"stream":{"kind":"session","id":"fixture-muse"},"payload_type":"runtime.user_intent.accepted","payload":{"refill_blocks":[{"kind":"text","text":"Our verification word is juniper-749."}]}}
+{"stream":{"kind":"session","id":"fixture-muse"},"payload_type":"runtime.session","payload":{"event":{"kind":"reasoning_committed","encrypted_content":"private-fixture"}}}
+{"stream":{"kind":"session","id":"fixture-muse"},"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"I have recorded the word."}}}
