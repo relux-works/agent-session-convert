@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Build a deterministic, dependency-free Python zipapp for Curator distributions."""
+import argparse
+from pathlib import Path
+import zipfile
+
+root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("output", type=Path)
+path = parser.parse_args().output
+sources = {"__main__.py": (root / "agent-session-convert").read_bytes()}
+package = root / "session_convert"
+for source in sorted(package.iterdir()):
+    if source.suffix in (".py", ".json"):
+        sources["session_convert/" + source.name] = source.read_bytes()
+with path.open("xb") as stream:
+    stream.write(b"#!/usr/bin/env python3\n")
+    with zipfile.ZipFile(stream, mode="w") as archive:
+        for name, data in sorted(sources.items()):
+            entry = zipfile.ZipInfo(name)
+            entry.external_attr = 0o100644 << 16
+            archive.writestr(entry, data, compress_type=zipfile.ZIP_STORED)
+path.chmod(0o755)

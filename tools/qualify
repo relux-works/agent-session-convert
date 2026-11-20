@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Inspect a source × target matrix with the installed providers in a dedicated test home."""
+import argparse
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from session_convert.cli import capture, project
+from session_convert.ir import write_json
+from session_convert.readers import READERS
+from session_convert.targets import inspect_muse
+
+
+def codex_history(sid):
+    # Bound the entire handshake and native resume, including a stalled stdio transport.
+    requests = [
+        {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "session_convert", "version": "1"}}},
+        {"method": "initialized"},
+        {"id": 2, "method": "thread/resume", "params": {"threadId": sid}},
+    ]
+    with subprocess.Popen(["codex", "app-server"], text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL) as proc:
+        import signal
+        def timeout(*_):
+            raise TimeoutError("Codex app-server timeout")
+        previous = signal.signal(signal.SIGALRM, timeout)
+        signal.alarm(45)
+        try:
+            for request in requests:
+                proc.stdin.write(json.dumps(request) + "\n")
+                proc.stdin.flush()
+                if "id" in request:
+                    for line in proc.stdout:
+                        reply = json.loads(line)
+                        if reply.get("id") == request["id"]:
+                            if "error" in reply:
+                                raise ValueError("Codex rejected the thread")
+                            break
+                    else:
+                        raise ValueError("Codex closed the stream")
+            thread = reply["result"]["thread"]
+            if thread["id"] != sid:
+                raise ValueError("Codex resumed another thread")
+            return json.dumps(thread["turns"], ensure_ascii=False)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+            proc.terminate()
+
+
+def provider_readback(provider, info, marker):
+    sid = info["target_id"]
+    if provider == "codex":
+        history = codex_history(sid)
+    elif provider == "claude":
+        from claude_agent_sdk import get_session_messages
+        messages = get_session_messages(sid, directory=info["workspace"])
+        history = json.dumps([m.message for m in messages], ensure_ascii=False)
+    else:
+        path = Path(info["target_log"])
+        inspect_muse(path)
+        # trace validates native replay; compare the fixture marker in committed messages as well.
+        with path.open() as source:
+            replies = []
+            for line in source:
+                for kind, payload in READERS["muse"](json.loads(line)):
+                    if kind in ("user_message", "assistant_message"):
+                        replies.extend(b["text"] for b in payload["content"])
+        history = "\n".join(replies)
+    if marker not in history:
+        raise ValueError("qualification marker missing from native history")
+
+
+QUESTION = "Which verification word did I give you earlier? Reply with just that word."
+
+
+def verify_turn(provider, info, word, output):
+    sid = info["target_id"]
+    if provider == "claude":
+        argv = ["claude", "-p", "--resume", sid, "--tools", "", "--max-turns", "1", QUESTION]
+    elif provider == "codex":
+        argv = ["codex", "exec", "--sandbox", "read-only", "resume", "--skip-git-repo-check",
+                "--output-last-message", str(output), sid, QUESTION]
+    else:
+        argv = ["muse", "exec", "--session-id", sid, "--workspace", info["workspace"],
+                "--disable-shell", "--disable-write", "--disable-web-tools", QUESTION]
+    proc = subprocess.run(argv, cwd=info["workspace"], capture_output=True, timeout=180, text=True)
+    answer = output.read_text() if provider == "codex" and output.exists() else proc.stdout
+    if proc.returncode or word not in [line.strip() for line in answer.splitlines()]:
+        raise ValueError("bounded resume did not return the fixture word")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--scratch", type=Path, required=True, help="existing task-owned test environment")
+    for provider in READERS:
+        p.add_argument("--" + provider, required=True, type=Path, help="test transcript with verification word")
+    p.add_argument("--word", required=True)
+    p.add_argument("--check-turn", action="store_true")
+    a = p.parse_args()
+    root = a.scratch.resolve(strict=True)
+    # Refuse accidental publication to the operator's ordinary provider stores.
+    for key in ("HOME", "TMPDIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "CODEX_HOME"):
+        path = Path(os.environ.get(key, "/")).resolve()
+        if root not in path.parents:
+            p.error(f"{key} must be under --scratch")
+    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if claude_dir and root not in Path(claude_dir).resolve().parents:
+        p.error("CLAUDE_CONFIG_DIR must be under --scratch")
+    if root not in Path.cwd().resolve().parents:
+        p.error("working directory must be under --scratch")
+    os.umask(0o077)
+    output = Path(tempfile.mkdtemp(dir=root, prefix="matrix-"))
+    workspace = output / "workspace"
+    workspace.mkdir()
+    results = {}
+    versions = {k: subprocess.check_output([k, "--version"], text=True).strip() for k in READERS}
+    report = dict(versions=versions, platform=platform.platform(), cells=results,
+                  mode="bounded_resume" if a.check_turn else "native_readback")
+    for reader in READERS:
+        source = getattr(a, reader).resolve(strict=True)
+        bundle = output / (reader + "-ir")
+        capture(source, reader, bundle)
+        for writer in READERS:
+            name = reader + "-" + writer
+            cell = results[name] = dict(status="pending")
+            try:
+                target = project(bundle, output / name, writer, workspace, "compact", 240, False,
+                                 True, source, qualification=True)
+                provider_readback(writer, target, a.word)
+                cell["native_readback"] = True
+                if a.check_turn:
+                    verify_turn(writer, target, a.word, output / (name + "-answer"))
+                    cell["answered"] = True
+                cell["status"] = "passed"
+            except (OSError, ValueError, ImportError, subprocess.SubprocessError) as error:
+                cell.update(status="failed", reason=str(error))
+            write_json(output / "matrix.json", report)
+            print(name, cell["status"], flush=True)
+    print(output / "matrix.json")
+    return int(any(c["status"] != "passed" for c in results.values()))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
