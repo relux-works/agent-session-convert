@@ -5,6 +5,11 @@
 
 ## 2026-11-20
 
+### 0520 — Name value byte emergency; review sent
+- FINDING: Full head set (holders+devices+certs) over a NIP-05+relay landlord value exceeds the 520-byte Namecoin limit (~601). Optimizations B1-B6 in Downloads/REVIEW-new-specs-and-name-bytes.md free 140-220 bytes without touching grant bytes or invariants.
+- FINDING: LIP-0032 draft conflicts: direct head not registered in LIP-0010 SH2; agent card signer must be owner device + subject countersignature, not the agent message key. Fix after keeper review.
+- STATUS: Review posted to agents1-keeper 2026-11-20 (lobby topic session-convert-review).
+
 ### 0445 — Identity card belongs on Namecoin (idea, owner request)
 - FINDING: The a2a agent card (`agents/<name>.md` in a2a-swarm + `card set`) is a
   projection of an entity's public identity: address, runtime, owner, role, rooms,
